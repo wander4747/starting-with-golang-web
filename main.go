@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/gorilla/mux"
 )
 
 type Post struct {
@@ -18,25 +19,50 @@ type Post struct {
 var db, err = sql.Open("mysql", "root:@/go_course?charset=utf8")
 
 func main() {
-	stmt, err := db.Prepare("INSERT INTO posts(title, body) VALUES(?, ?)")
+
+	r := mux.NewRouter()
+	r.PathPrefix("/static").Handler(http.StripPrefix("/static", http.FileServer(http.Dir("static/"))))
+
+	r.HandleFunc("/", HomeHandler)
+	r.HandleFunc("/{id}/view", ViewHandler)
+
+	fmt.Println(http.ListenAndServe(":8080", r))
+}
+
+func ListPosts() []Post {
+	rows, err := db.Query("SELECT * FROM posts")
 	checkError(err)
 
-	_, err = stmt.Exec("My first post", "my first content")
-	checkError(err)
+	items := []Post{}
+	for rows.Next() {
+		post := Post{}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		post := Post{Id: 1, Title: "First Post", Body: "Our content"}
+		rows.Scan(&post.Id, &post.Title, &post.Body)
+		items = append(items, post)
+	}
+	return items
+}
 
-		if title := r.FormValue("title"); title != "" {
-			post.Title = title
-		}
+func GetPostById(id string) Post {
+	row := db.QueryRow("SELECT * FROM posts WHERE id = ?", id)
+	post := Post{}
+	row.Scan(&post.Id, &post.Title, &post.Body)
+	return post
+}
 
-		template := template.Must(template.ParseFiles("templates/index.html"))
-		if err := template.ExecuteTemplate(w, "index.html", post); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	})
-	fmt.Println(http.ListenAndServe(":8080", nil))
+func HomeHandler(w http.ResponseWriter, r *http.Request) {
+	template := template.Must(template.ParseFiles("templates/layout.html", "templates/list.html"))
+	if err := template.ExecuteTemplate(w, "layout.html", ListPosts()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func ViewHandler(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	template := template.Must(template.ParseFiles("templates/layout.html", "templates/view.html"))
+	if err := template.ExecuteTemplate(w, "layout.html", GetPostById(id)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func checkError(err error) {
